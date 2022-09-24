@@ -1,14 +1,13 @@
 import logging
 import time
-
 import bs4
 import re
 import json
-import random
 from datetime import datetime
 from requests import Response
 from db_connector import DBConnector
 from proxy_manager import ProxyManager
+from ThreadingPool import ThreadPool
 from exceptions import *
 import cloudscraper
 
@@ -48,18 +47,6 @@ class ABCMonitor(BaseConnectionClass):
         self.refresh_time = refresh_time
         self.url_list = []
         self.logger.debug('URL Monitor has been successfully initialised')
-        # self._get_user_agents()
-
-    # def _get_user_agents(self):
-    #     """
-    #     This function reads web user agents from txt file in utils folder.
-    #     """
-    #     with open('utils/user-agents.txt', 'r', encoding='utf-8') as f:
-    #         self.user_agents = [line.strip().replace('\n', '') for line in f.readlines()]
-    #         self.logger.info(f'Read {len(self.user_agents)} user agents from txt file.')
-    # 
-    # def _get_random_user_agent(self):
-    #     return random.choice(self.user_agents)
 
     def _add_url(self, url: str, title: str):
         """
@@ -151,62 +138,73 @@ class OlxUrlMonitor(ABCMonitor):
             if link_button:
                 yield link_button.get('href')
 
-    def _get_product_info(self, olx_href: str):
-        url = f'https://olx.pl{olx_href}'
-        response = self.session.get(url)
-
-    # TODO insert products to db, and the rest of logic of checking products
-    def _check_search(self, url: str):
+    # TODO the rest of logic of checking products
+    def _check_search(self, url: str, case_id: int):
+        self.logger.debug(f'Checking search for updates, ID: {case_id}, URL: {url}')
         self._get_new_session()
         try:
             response = self.session.get(url)
             self._check_search_complete(response.text)
             hrefs = self._get_products_from_search(response)
-            # products = []
-            # for link in hrefs:
+            products = []
+            for link in hrefs:
+                products.append(OlxProduct(url=link, parent_id=case_id))
+            for product in products:
+                if not self.db_connector.is_product_in_db(product_id=int(product.id)):
+                    product.insert_to_db()
+                    # TODO SEND NOTIFICATION
+                else:
+                    pass
+
 
         except TimeoutError:
             self.logger.exception(
                 f'Proxy `{self.session.proxies["http"]}` has been timed out. Retrying with different one...')
-            self._check_search(url)
+            self._check_search(url, case_id)
 
         except RequestResponseInterrupted as e:
             self.logger.exception(f'Request failed. Reason: `{e.reason}`. Retrying...')
-            self._check_search(url)
+            self._check_search(url, case_id)
 
 
 class OlxProduct(BaseConnectionClass):
-    def __init__(self, url: str):
+    def __init__(self, url: str, parent_id: int):
         super().__init__()
         self.link = url
         self.title = ''
         self.id = ''
+        self.parent_id = parent_id
         self.session = None
         self._get_new_session()
+        self.get_product_data()
+
+    @staticmethod
+    def _check_request(soup):
+        elem_nav_1 = soup.find('h1', attrs={
+            'class': 'c-container__title'
+        })
+        elem_nav_2 = soup.find('p', attrs={
+            'class': 'c-container__description'
+        })
+        elem_succes = soup.find('div', attrs={'data-cy': 'ad_description'}).find('h3', attrs={
+            'class': 'css-1m9lat4-Text'})
+        if elem_nav_1 and elem_nav_2:
+            if 'wygląda na to, że używasz nieaktualnej wersji przeglądarki' in elem_nav_1.text.lower() and \
+                    'aby nadal korzystać z OLX, przejdź do ustawień przeglądarki i zaktualizuj ją do najnowszej wersji.' \
+                    in elem_nav_2.text.lower():
+                raise RequestResponseInterrupted('Too old browser is being used. Try something newer.')
+        elif 'opis' in elem_succes.text.lower():
+            pass
+        else:
+            raise RequestResponseInterrupted('Unknown error occurred, page was not loaded properly.')
 
     def get_product_data(self):
+        self.logger.debug(f'Getting product info for {self.link}...')
         soup = None
         try:
             product_data = self.session.get(self.link)
             soup = bs4.BeautifulSoup(product_data)
-            elem_nav_1 = soup.find('h1', attrs={
-                'class': 'c-container__title'
-            })
-            elem_nav_2 = soup.find('p', attrs={
-                'class': 'c-container__description'
-            })
-            elem_succes = soup.find('div', attrs={'data-cy': 'ad_description'}).find('h3', attrs={
-                'class': 'css-1m9lat4-Text'})
-            if elem_nav_1 and elem_nav_2:
-                if 'wygląda na to, że używasz nieaktualnej wersji przeglądarki' in elem_nav_1.text.lower() and \
-                        'aby nadal korzystać z OLX, przejdź do ustawień przeglądarki i zaktualizuj ją do najnowszej wersji.' \
-                        in elem_nav_2.text.lower():
-                    raise RequestResponseInterrupted('Too old browser is being used. Try something newer.')
-            elif 'opis' in elem_succes.text.lower():
-                pass
-            else:
-                raise RequestResponseInterrupted('Unknown error occurred, page was not loaded properly.')
-
+            self._check_request(soup)
         except TimeoutError:
             self.logger.exception(
                 f'Proxy `{self.session.proxies["http"]}` has been timed out. Retrying with different one...')
@@ -216,3 +214,13 @@ class OlxProduct(BaseConnectionClass):
         self.title = soup.find('h1', attrs={'class': 'css-r9zjja-Text'}).text.strip()
         self.id = soup.find('div', attrs={'data-cy': 'ad-footer-bar-section'}).find('span', attrs={
             'class': 'css-9xy3gn-Text'}).text.strip().split(' ')[1]
+
+    def insert_to_db(self):
+        self.logger.debug(f'Inserting new product to database, ID: {self.id}, URL: {self.link}')
+        self.db_connector.insert_new_product(
+            title=self.title,
+            id=int(self.id),
+            url=self.link,
+            parent_id=self.parent_id
+        )
+        self.logger.info(f'Inserted product to db ID: {self.id}, PARENT ID: {self.parent_id}')

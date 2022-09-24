@@ -10,6 +10,7 @@ class DBConnector:
     Connector object to the PostgreSQL database.
     It permforms every database operation in the script.
     """
+
     def __init__(self, credentials: dict):
         self.logger = logging.getLogger()
         self.connection = psycopg2.connect(
@@ -87,19 +88,43 @@ class DBConnector:
         else:
             self.logger.exception(f'Cannot insert `{title}` [url] to the database, connection is not established!')
 
-    def _insert_new_product(self, title: str, id: int, url: str, parent_id: int):
+    def insert_new_product(self, title: str, id: int, url: str, parent_id: int):
         """
         This function adds new record to table "urls_to_monitor" to database. It allows you to add new link to get notifications from
         :param title: product name
         :param id: product ID
         :param url: product link
+        :param parent_id: ID of the search url from the database
         """
         if self.connected:
             upload_date = datetime.now().strftime('%Y-%m-%d %T')
             self.cursor.execute(
                 """
-                    INSERT INTO products (id, url, upload_date, parent_id) VALUES (%s, %s, %s, %s)
+                    INSERT INTO products (id, url, upload_date, parent_id) VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO NOTHING
                 """, (id, url, upload_date, parent_id)
             )
         else:
             self.logger.exception(f'Cannot insert `{title}` [product] to the database, connection is not established!')
+
+    def is_product_in_db(self, url: str = None, product_id: int = None):
+        if self.connected:
+            data = None
+            if url:
+                self.cursor.execute(
+                    """
+                        SELECT id FROM products WHERE url = %s
+                    """
+                ), (url,)
+                data = self.cursor.fetchone()
+            elif product_id:
+                self.cursor.execute(
+                    """
+                        SELECT id FROM products WHERE id = %s
+                    """
+                ), (product_id,)
+                data = self.cursor.fetchone()
+            else:
+                self.logger.exception('Failed to search for product in database, no needed data provided.')
+                raise ValueError('Neither URL nor PRODUCT_ID not provided')
+
+            return True if data else False
