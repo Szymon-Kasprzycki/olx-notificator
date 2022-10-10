@@ -4,9 +4,12 @@ import fbchat
 #############################
 login_email = 'xx@123.com'
 login_pwd = 'xx123'
+
+
 #############################
 
 
+# TODO Make notificator login credentials from file etc
 class Notificator:
     def __init__(self):
         self.logger = logging.getLogger()
@@ -14,20 +17,29 @@ class Notificator:
             email=login_email,
             password=login_pwd
         )
-        self.MESSAGE = """
-                            Cześć, tu twój wirtualny asystent OLX. 
-                            Pojawiło się nowe ogłoszenie w obserwowanym wyszukiwaniu!
-                            Tytuł: {}
-                            Link: {}
-                        """
+        self.MESSAGES = {
+            'PL': """
+                        Cześć, tu twój wirtualny asystent OLX. 
+                        Pojawiło się nowe ogłoszenie w obserwowanym wyszukiwaniu!
+                        Tytuł: {}
+                        Link: {}
+            """,
+            'EN': """
+                        Hey, here's you virtual OLX asistent.
+                        There is new product in observed search!
+                        Title: {}
+                        URL: {}
+            """
+        }
 
-    def send_new_product_notification(self, product_url: str, product_title: str, receiver: str = 'Szymon Kasprzycki'):
-        self.logger.info(f'Sending message using messenger, about [{product_url}]')
-        MESSAGE = self.MESSAGE.format(product_title, product_url)
+
+    def send_new_product_notification(self, product_url: str, product_title: str, receiver: str = 'Szymon Kasprzycki', language: str = 'EN'):
+        self.logger.info(f'Sending message using fb messenger, about [{product_url}]')
+        message = self.MESSAGES[language].format(product_title, product_url)
         target_user = self.client.searchForUsers(receiver)[0]
         if target_user.is_friend:
             sent = self.client.sendMessage(
-                message=MESSAGE,
+                message=message,
                 thread_id=target_user.uid
             )
             if sent:

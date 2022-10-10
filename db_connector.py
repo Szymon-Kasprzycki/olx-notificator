@@ -67,6 +67,7 @@ class DBConnector:
     def insert_new_link(self, title: str, url: str, last_updated: Union[str, datetime]):
         """
         This function adds new record to table "urls_to_monitor" to database. It allows you to add new link to get notifications from
+
         :param title: Title of link, it's name
         :param url: Link address
         :param last_updated: Last time when link was checked for update
@@ -91,6 +92,7 @@ class DBConnector:
     def insert_new_product(self, title: str, id: int, url: str, parent_id: int):
         """
         This function adds new record to table "urls_to_monitor" to database. It allows you to add new link to get notifications from
+
         :param title: product name
         :param id: product ID
         :param url: product link
@@ -107,6 +109,13 @@ class DBConnector:
             self.logger.exception(f'Cannot insert `{title}` [product] to the database, connection is not established!')
 
     def is_product_in_db(self, url: str = None, product_id: int = None):
+        """
+        Check whether product already exists in database, include one of two attributes
+
+        :param url: Product URL, default None
+        :param product_id: Product OLX ID, default None
+        :return: True if product exists else False
+        """
         if self.connected:
             data = None
             if url:
