@@ -5,31 +5,35 @@ from ThreadingPool import ThreadPool
 import logging
 import requests
 from bs4 import BeautifulSoup
-from log import LogFileHandler, LogStreamHandler
+# from log import LogFileHandler, LogStreamHandler
 
-logger = logging.getLogger()
-logger.setLevel('DEBUG')
-ch = LogStreamHandler()
-logger.addHandler(ch)
-fh = LogFileHandler()
-logger.addHandler(fh)
+# logger = logging.getLogger()
+# logger.setLevel('DEBUG')
+# ch = LogStreamHandler()
+# logger.addHandler(ch)
+# fh = LogFileHandler()
+# logger.addHandler(fh)
 
 
 class ProxyManager:
     """
     Class to manage proxy addresses and share it with other modules
     """
-    def __init__(self):
+    def __init__(self, loop: asyncio.AbstractEventLoop = None):
         self.proxies = []
         self._proxies_to_remove = []
+        self.loop_tasks = []
         self.working_count: int
         self.logger = logging.getLogger()
         self._get_session()
         self.logger.debug('Proxy manager initialised')
-        self.loop = asyncio.new_event_loop()
-        self.loop.create_task(self.get_and_validate_proxies())
-        self.loop.create_task(self._remove_broken_proxies())
-        self.loop.run_forever()
+        self.loop = loop or asyncio.new_event_loop()
+        self.loop_tasks.append(self.loop.create_task(self.get_and_validate_proxies()))
+        self.loop_tasks.append(self.loop.create_task(self._remove_broken_proxies()))
+        #self.loop.create_task(self.get_and_validate_proxies())
+        #self.loop.create_task(self._remove_broken_proxies())
+        if not loop:
+            self.loop.run_forever()
 
     def _get_session(self):
         """
@@ -127,6 +131,6 @@ class ProxyManager:
 
 
 # TESTS
-if __name__ == '__main__':
-    pm = ProxyManager()
+# if __name__ == '__main__':
+#     pm = ProxyManager()
     # pm.get_new_proxies()
