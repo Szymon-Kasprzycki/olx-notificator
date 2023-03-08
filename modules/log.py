@@ -24,3 +24,13 @@ class LogFileHandler(logging.FileHandler):
         formatter = logging.Formatter(fmt, fmt_date)
         self.setFormatter(formatter)
         self.setLevel(FILE_LOGGING_LEVEL)
+
+
+def prepare_logger() -> logging.Logger:
+    logger = logging.getLogger()
+    logger.setLevel('DEBUG')
+    ch = LogStreamHandler()
+    logger.addHandler(ch)
+    fh = LogFileHandler()
+    logger.addHandler(fh)
+    return logger

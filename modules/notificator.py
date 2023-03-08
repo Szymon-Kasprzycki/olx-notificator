@@ -2,6 +2,9 @@ import logging
 import fbchat
 from exceptions import *
 
+G_RECEIVER = 'Szymon Kasprzycki'
+G_LANGUAGE = 'EN'
+
 #############################
 login_email = 'xx@123.com'
 login_pwd = 'xx123'
@@ -33,8 +36,8 @@ class Notificator:
         }
 
 
-def send_new_product_notification(self, product_url: str, product_title: str, receiver: str = 'Szymon Kasprzycki',
-                                  language: str = 'EN'):
+def send_new_product_notification(self, product_url: str, product_title: str, receiver: str = G_RECEIVER,
+                                  language: str = G_LANGUAGE) -> None:
     self.logger.info(f'Sending message using fb messenger, about [{product_url}]')
     message = self.MESSAGES[language].format(product_title, product_url)
     target_user = self.client.searchForUsers(receiver)[0]

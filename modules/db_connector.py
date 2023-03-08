@@ -5,13 +5,33 @@ from typing import Union
 from datetime import datetime
 
 
+def print_psycopg2_exception(err) -> None:
+    """
+    Prints the error message from psycopg2
+    :param err: Exception
+    """
+    err_type, traceback = err.__class__, err.__traceback__
+    line_number = traceback.tb_lineno
+    log = logging.getLogger()
+    log.error(f'Psycopg2 ERROR: {err} on line number: {line_number}')
+    log.error('Psycopg2 traceback: ', exc_info=err)
+    diag = err.diag
+    log.error(f'Psycopg2 error: {diag.pgcode}: {diag.pgerror}')
+
+
 class DBConnector:
     """
     Connector object to the PostgreSQL database.
-    It permforms every database operation in the script.
+    It performs every database operation in the script.
+    Credentials:
+        - hostname
+        - port
+        - database
+        - login
+        - password
     """
 
-    def __init__(self, credentials: dict):
+    def __init__(self, credentials: dict) -> None:
         self.logger = logging.getLogger()
         self.connection = psycopg2.connect(
             host=credentials['hostname'],
@@ -25,7 +45,7 @@ class DBConnector:
         self._init_tables()
         self.logger.info('Successfully connected to the database')
 
-    def _init_tables(self):
+    def _init_tables(self) -> None:
         """
         Create two tables in database if they not exist - "urls_to_monitor" and "items"
         """
@@ -38,7 +58,7 @@ class DBConnector:
                     last_updated    varchar(50))
             """
         )
-
+        self.logger.info('Successfully prepared table `urls` in database')
         self.cursor.execute(
             """
                 CREATE TABLE IF NOT EXISTS products (
@@ -49,8 +69,10 @@ class DBConnector:
                     FOREIGN KEY ("parent_id") REFERENCES "urls_to_monitor"("id"))
             """
         )
+        self.logger.info('Successfully prepared table `products` in database')
+        self.connection.commit()
 
-    def download_existing_data(self):
+    def download_existing_data(self) -> list:
         """
         This functions downloads from database existing urls that needs to be monitored.
 
@@ -64,7 +86,7 @@ class DBConnector:
         for position in self.cursor.fetchall():
             yield dict(position)
 
-    def insert_new_link(self, title: str, url: str, last_updated: Union[str, datetime]):
+    def insert_new_link(self, title: str, url: str, last_updated: Union[str, datetime] = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")) -> None:
         """
         This function adds new record to table "urls_to_monitor" to database. It allows you to add new link to get notifications from
 
@@ -79,17 +101,22 @@ class DBConnector:
                     FROM urls_to_monitor;
                 """
             )
-            highest_id = int(self.cursor.fetchone()['max'])
+            data = self.cursor.fetchone()
+            if data['max']:
+                highest_id = int(data['max'])
+            else:
+                highest_id = None
             new_id = highest_id + 1 if highest_id else 1
             self.cursor.execute(
                 """
                     INSERT INTO urls_to_monitor (id, title, url, last_updated) VALUES (%s, %s, %s, %s)
                 """, (new_id, title, url, str(last_updated))
             )
+            self.connection.commit()
         else:
             self.logger.exception(f'Cannot insert `{title}` [url] to the database, connection is not established!')
 
-    def insert_new_product(self, title: str, id: int, url: str, parent_id: int):
+    def insert_new_product(self, id: int, url: str, parent_id: int) -> None:
         """
         This function adds new record to table "urls_to_monitor" to database. It allows you to add new link to get notifications from
 
@@ -105,10 +132,11 @@ class DBConnector:
                     INSERT INTO products (id, url, upload_date, parent_id) VALUES (%s, %s, %s, %s) ON CONFLICT (id) DO NOTHING
                 """, (id, url, upload_date, parent_id)
             )
+            self.connection.commit()
         else:
-            self.logger.exception(f'Cannot insert `{title}` [product] to the database, connection is not established!')
+            self.logger.exception(f'Cannot insert `{id}` [product] to the database, connection is not established!')
 
-    def is_product_in_db(self, url: str = None, product_id: int = None):
+    def is_product_in_db(self, url: str = None, product_id: int = None) -> bool:
         """
         Check whether product already exists in database, include one of two attributes
 
@@ -117,7 +145,6 @@ class DBConnector:
         :return: True if product exists else False
         """
         if self.connected:
-            data = None
             if url:
                 self.cursor.execute(
                     """
@@ -137,3 +164,21 @@ class DBConnector:
                 raise ValueError('Neither URL nor PRODUCT_ID not provided')
 
             return True if data else False
+        else:
+            self.logger.exception(f'Cannot search for product in database, connection is not established!')
+            return False
+
+    def __del__(self) -> None:
+        self.connection.commit()
+        self.cursor.close()
+        self.connection.close()
+        self.logger.info('Successfully disconnected from the database')
+
+# TEST
+if __name__ == '__main__':
+    import json
+    from log import prepare_logger
+    logger = prepare_logger()
+    with open('credentials.json') as f:
+        credentials = json.load(f)
+    conn = DBConnector(credentials)

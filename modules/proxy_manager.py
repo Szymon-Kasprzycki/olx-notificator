@@ -5,37 +5,30 @@ from ThreadingPool import ThreadPool
 import logging
 import requests
 from bs4 import BeautifulSoup
-# from log import LogFileHandler, LogStreamHandler
-
-# logger = logging.getLogger()
-# logger.setLevel('DEBUG')
-# ch = LogStreamHandler()
-# logger.addHandler(ch)
-# fh = LogFileHandler()
-# logger.addHandler(fh)
 
 
 class ProxyManager:
     """
     Class to manage proxy addresses and share it with other modules
     """
-    def __init__(self, loop: asyncio.AbstractEventLoop = None):
+    def __init__(self, loop: asyncio.AbstractEventLoop = None) -> None:
         self.proxies = []
         self._proxies_to_remove = []
         self.loop_tasks = []
         self.working_count: int
         self.logger = logging.getLogger()
         self._get_session()
-        self.logger.debug('Proxy manager initialised')
+        #self.get_and_validate_proxies()
         self.loop = loop or asyncio.new_event_loop()
         self.loop_tasks.append(self.loop.create_task(self.get_and_validate_proxies()))
         self.loop_tasks.append(self.loop.create_task(self._remove_broken_proxies()))
-        #self.loop.create_task(self.get_and_validate_proxies())
-        #self.loop.create_task(self._remove_broken_proxies())
+        self.loop.create_task(self.get_and_validate_proxies())
+        self.loop.create_task(self._remove_broken_proxies())
+        self.logger.debug('Proxy manager initialised')
         if not loop:
-            self.loop.run_forever()
+           self.loop.run_forever()
 
-    def _get_session(self):
+    def _get_session(self) -> None:
         """
         Get new requests session
 
@@ -45,7 +38,7 @@ class ProxyManager:
         self.session = cloudscraper.create_scraper(s)
         self.logger.debug('Session for Proxy Manager was successfully created!')
 
-    def _check_proxy(self, proxy: dict):
+    def _check_proxy(self, proxy: dict) -> None:
         """
         Check if proxy server is accessible and working
 
@@ -80,7 +73,7 @@ class ProxyManager:
                 self.logger.debug(f'[*] TOTAL VALID PROXIES: {len(self.proxies) - len(self._proxies_to_remove)}')
             await asyncio.sleep(240)
 
-    async def _remove_broken_proxies(self):
+    async def _remove_broken_proxies(self) -> None:
         """
         Exclude not working proxy servers from Manager memory
 
@@ -93,7 +86,7 @@ class ProxyManager:
                 self._proxies_to_remove = []
             await asyncio.sleep(60)
 
-    def get_new_proxies(self):
+    def get_new_proxies(self) -> None:
         """
         Download new proxy addresses from the internet.
         :return: None
@@ -112,14 +105,14 @@ class ProxyManager:
         except Exception as e:
             self.logger.exception(f'Cannot download new proxies, error: {e}')
 
-    def get_random_proxy(self):
+    def get_random_proxy(self) -> dict:
         """
         Get random proxy from Manager memory
         :return: dict["ip", "port"]
         """
         return random.choice(self.proxies)
 
-    def remove_broken_proxy(self, proxy: dict):
+    def remove_broken_proxy(self, proxy: dict) -> None:
         """
         Remove one proxy address from Manager's memory
 
@@ -131,6 +124,9 @@ class ProxyManager:
 
 
 # TESTS
-# if __name__ == '__main__':
-#     pm = ProxyManager()
-    # pm.get_new_proxies()
+if __name__ == '__main__':
+    #from log import prepare_logger
+    #logger = prepare_logger()
+    #pm = ProxyManager()
+    #pm.get_new_proxies()
+    pass

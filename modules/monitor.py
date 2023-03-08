@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 import bs4
@@ -24,21 +25,24 @@ class BaseConnectionClass:
     """
     Base class for any modules using web connection
     """
-    def __init__(self):
+    def __init__(self) -> None:
         self.logger = logging.getLogger()
+        self.logger.debug('**** Base connection class initialised ****')
         self.db_connector = DBConnector(credentials=auth)
         self.proxy_manager = ProxyManager()
-        self.notificator = Notificator()
+        #self.notificator = Notificator()
+        # TODO: change to await.sleep (async funct) instead of time.sleep
         time.sleep(3)
-        self._get_new_session()
+        self._set_new_session()
 
-    def _get_new_session(self):
+    def _set_new_session(self) -> None:
         self.session = cloudscraper.create_scraper(interpreter='V8')
         proxy = self.proxy_manager.get_random_proxy()
         self.session.proxies = {
             'http': f'http://{proxy["ip"]}:{proxy["port"]}',
             'https': f'http://{proxy["ip"]}:{proxy["port"]}'
         }
+        self.logger.debug(f'New session with proxy {proxy["ip"]}:{proxy["port"]} has been created')
 
 
 class ABCMonitor(BaseConnectionClass):
@@ -46,13 +50,14 @@ class ABCMonitor(BaseConnectionClass):
     Base object to allow monitoring changes in products for given urls
     """
 
-    def __init__(self, refresh_time: int):
+    def __init__(self, refresh_time: int, loop: asyncio.AbstractEventLoop) -> None:
         super(ABCMonitor, self).__init__()
         self.refresh_time = refresh_time
+        self.loop = loop
         self.url_list = []
         self.logger.debug('New URL Monitor has been successfully initialised')
 
-    def _add_url(self, url: str, title: str):
+    def _add_url(self, url: str, title: str) -> None:
         """
         This function allows to add new OLX web address to monitor new items there
         :param url: link to the search page
@@ -68,6 +73,11 @@ class ABCMonitor(BaseConnectionClass):
             re.IGNORECASE
         )
         if re.match(regex, url) is not None:
+            print("********************************")
+            print("")
+            print(f"New URL to monitor: {url}")
+            print("")
+            print("********************************")
             self.url_list.append(
                 {
                     'title': title,
@@ -76,14 +86,16 @@ class ABCMonitor(BaseConnectionClass):
                     'last_updated': 'none',
                 }
             )
+            self.logger.info(f'New URL has been added to the monitor: {url}')
+            self.db_connector.insert_new_link(url=url, title=title)
 
 
 class OlxUrlMonitor(ABCMonitor):
-    def __init__(self, refresh_time: int):
-        super().__init__(refresh_time)
+    def __init__(self, refresh_time: int, loop: asyncio.AbstractEventLoop) -> None:
+        super(OlxUrlMonitor, self).__init__(refresh_time, loop=loop)
 
     @staticmethod
-    def _prepare_url(url: str):
+    def _prepare_url(url: str) -> str:
         """
         This function makes change to the OLX search URL to use it properly in the script
         :param url: web address to be checked as string
@@ -102,16 +114,19 @@ class OlxUrlMonitor(ABCMonitor):
                 url.replace(to_replace, '=created_at:desc')
 
         elif '/?' in url:
-            url += '&search%5Border%5D=created_at:desc'
+            url += 'search%5Border%5D=created_at:desc'
 
         else:
             url += '/?search%5Border%5D=created_at:desc'
 
         return url
 
-    def add_url(self, url: str, title: str):
+    def add_url(self, url: str, title: str) -> None:
         """
         Add new link to the monitor
+        Url has to start with https or http
+        It can be an ip address or domain name
+        It can contain a port number
         :param url: link
         :param title: Search title
         :return: None
@@ -120,7 +135,7 @@ class OlxUrlMonitor(ABCMonitor):
         self._add_url(url=url, title=title)
 
     @staticmethod
-    def _check_search_complete(response: str):
+    def _check_search_complete(response: str) -> None:
         """
         Check if OLX search was complete
         :param response: OLX search GET request response
@@ -133,19 +148,19 @@ class OlxUrlMonitor(ABCMonitor):
         elem_nav_2 = soup.find('p', attrs={
             'class': 'c-container__description'
         })
-        elem_succes = soup.find('div', attrs={'data-testid': 'total-count'})
+        elem_success = soup.find('div', attrs={'data-testid': 'total-count'})
         if elem_nav_1 and elem_nav_2:
             if 'wygląda na to, że używasz nieaktualnej wersji przeglądarki' in elem_nav_1.text.lower() and \
                     'aby nadal korzystać z OLX, przejdź do ustawień przeglądarki i zaktualizuj ją do najnowszej wersji.' \
                     in elem_nav_2.text.lower():
                 raise RequestResponseInterrupted('Too old browser is being used. Try something newer.')
-        elif 'znaleźliśmy' in elem_succes.text.lower():
+        elif 'znaleźliśmy' in elem_success.text.lower():
             pass
         else:
             raise RequestResponseInterrupted('Unknown error occurred, page was not loaded properly.')
 
     @staticmethod
-    def _get_products_from_search(search: Response):
+    def _get_products_from_search(search: Response) -> list:
         """
         Take products urls from OLX search
         :param search: OLX search request GET response
@@ -158,7 +173,7 @@ class OlxUrlMonitor(ABCMonitor):
             if link_button:
                 yield link_button.get('href')
 
-    def _check_search(self, url: str, case_id: int):
+    def _check_search(self, url: str, case_id: int, num_of_tries: int = 1) -> None:
         """
         Main function, which checks OLX search if there are any new products
         :param url: search link
@@ -166,7 +181,7 @@ class OlxUrlMonitor(ABCMonitor):
         :return:
         """
         self.logger.debug(f'Checking search for updates, ID: {case_id}, URL: {url}')
-        self._get_new_session()
+        self._set_new_session()
         try:
             response = self.session.get(url)
             self._check_search_complete(response.text)
@@ -176,10 +191,11 @@ class OlxUrlMonitor(ABCMonitor):
                 products.append(OlxProduct(url=link, parent_id=case_id))
             for product in products:
                 if not self.db_connector.is_product_in_db(product_id=int(product.id)):
-                    self.notificator.send_new_product_notification(
-                        product_url=product.link,
-                        product_title=product.title
-                    )
+                    # self.notificator.send_new_product_notification(
+                    #     product_url=product.link,
+                    #     product_title=product.title
+                    # )
+                    print(f'New product found: {product.title} - {product.link}')
                     product.insert_to_db()
 
         except TimeoutError:
@@ -188,23 +204,36 @@ class OlxUrlMonitor(ABCMonitor):
             self._check_search(url, case_id)
 
         except RequestResponseInterrupted as e:
-            self.logger.exception(f'Request failed. Reason: `{e.reason}`. Retrying...')
-            self._check_search(url, case_id)
+            if num_of_tries < 3:
+                self.logger.exception(f'Request failed. Reason: `{e}`. Retrying...')
+                self._check_search(url, case_id, num_of_tries + 1)
+            else:
+                self.logger.exception(f'Request failed. Reason: `{e}`. Giving up...')
 
 
 class OlxProduct(BaseConnectionClass):
     """
     Class to save OLX products as built in objects
     """
-    def __init__(self, url: str, parent_id: int):
+    def __init__(self, url: str, parent_id: int) -> None:
         super().__init__()
         self.link = url
         self.title = ''
         self.id = ''
         self.parent_id = parent_id
         self.session = None
-        self._get_new_session()
+        self._set_new_session()
         self.get_product_data()
+
+    # static method from Search class to obtain product class
+    # @staticmethod
+    # def from_search(search: Search) -> 'OlxProduct':
+    #     """
+    #     Create product object from search object
+    #     :param search: Search object
+    #     :return: Product object
+    #     """
+    #     return OlxProduct(url=search.link, parent_id=search.id)
 
     @staticmethod
     def _check_request(soup):
@@ -231,7 +260,7 @@ class OlxProduct(BaseConnectionClass):
         else:
             raise RequestResponseInterrupted('Unknown error occurred, page was not loaded properly.')
 
-    def get_product_data(self):
+    def get_product_data(self) -> None:
         self.logger.debug(f'Getting product info for {self.link}...')
         soup = None
         try:
@@ -247,13 +276,13 @@ class OlxProduct(BaseConnectionClass):
         self.title = soup.find('h1', attrs={'class': 'css-r9zjja-Text'}).text.strip()
         self.id = soup.find('div', attrs={'data-cy': 'ad-footer-bar-section'}).find('span', attrs={
             'class': 'css-9xy3gn-Text'}).text.strip().split(' ')[1]
+        self.logger.debug(f'Got product info for {self.link}...')
 
     def insert_to_db(self):
         self.logger.debug(f'Inserting new product to database, ID: {self.id}, URL: {self.link}')
         self.db_connector.insert_new_product(
-            title=self.title,
             id=int(self.id),
             url=self.link,
             parent_id=self.parent_id
         )
-        self.logger.info(f'Inserted product to db ID: {self.id}, PARENT ID: {self.parent_id}')
+        self.logger.info(f'Inserted product to db, ID: {self.id}, PARENT ID: {self.parent_id}')
